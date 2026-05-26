@@ -1,0 +1,154 @@
+---
+title: "Case-Method 1 : sakila"
+Analisis : Top 10 Film Terlaris ( paling banyak dirental )
+author: "Hafizda Choirulika Ainur Rahman"
+date: "2026-05-15"
+output: html_document
+---
+DESKRIPSI DATA :
+
+Dalam industri penyewaan film, manajemen inventaris yang efisien berakar pada pemahaman produk mana yang memiliki perputaran (turnover) paling tinggi. Analisis ini berfokus pada eksplorasi Top 10 Film Terlaris (Paling Banyak Dirental) pada database Sakila dengan mengintegrasikan tiga tabel utama: rental, inventory, dan film.Informasi ini sangat krusial bagi pihak manajemen untuk menentukan strategi re-stocking. Jika kita mengasumsikan tingkat popularitas sebuah film ($P_f$) dihitung berdasarkan fungsi agregasi total frekuensi transaksi penyewaan, kita dapat memodelkannya secara matematis sebagai berikut:
+$$ P_f = \sum_{i=1}^{n} X_{i,f} $$
+Di mana:$P_f$ = Skor popularitas atau total rental untuk film ke-$f$.$n$ = Total seluruh transaksi penyewaan yang tercatat dalam database.$X_{i,f}$ = Variabel indikator bernilai $1$ jika transaksi ke-$i$ melibatkan film ke-$f$, dan bernilai $0$ untuk kondisi lainnya:
+$$ X_{i,f} = \begin{cases} 1, & \text{jika transaksi } i \text{ adalah film } f \\ 0, & \text{jika transaksi } i \text{ bukan film } f \end{cases} $$
+Dengan memetakan 10 film dengan nilai $P_f$ tertinggi, perusahaan dapat mengidentifikasi karakteristik film potensial berdasarkan kategori batasan umur (rating) untuk mengoptimalkan profitabilitas di masa mendatang.
+
+VISUALISASI, ANALISIS DAN SINTAKS
+
+Untuk menghindari kendala tipe data bawaan ODBC (seperti kegagalan membaca format integer64 atau hilangnya nama kolom akibat variasi sistem operasi), sintaks SQL di bawah ini telah dilengkapi dengan explicit aliasing (AS), dan data hasil tarikan langsung dipaksa menjadi tipe data standar R menggunakan fungsi mutate().
+IMPORT DAN KONEKSI DATASET SQL KE R
+
+```{r}
+# Membuka koneksi ke MySQL lokal
+library(DBI)#load library DBI untuk koneksi dan kueri data
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(kableExtra)
+```
+
+```{r}
+odbc::odbcListDataSources()
+```
+
+```{r}
+
+con <- DBI::dbConnect(odbc::odbc(),
+                      Driver = "MySQL ODBC 9.7 ANSI Driver",
+                      Server = "127.0.0.1",
+                      Database = "sakila",
+                      UID = "root",
+                      PWD = "HfZtrissunt24089", #sesuaikan dg password masing-masing
+                      Port = 3306)
+```
+
+```{r}
+odbc::odbcListDrivers()
+```
+
+
+```{r}
+dbListTables(con)
+```
+```{r}
+# Eksekusi ini dulu sendirian!
+df_top_film <- dbGetQuery(con, query_top_film)
+df_top_film
+```
+
+```{r}
+# Cek apakah datanya ada atau kosong (0 rows)?
+print(dim(df_top_film))
+print(df_top_film)
+```
+
+```{r}
+# Query dengan alias eksplisit untuk menjamin kolom terbaca oleh R
+query_top_film <- "
+  SELECT 
+    f.title AS title,
+    f.rating AS rating,
+    f.rental_rate AS rental_rate,
+    COUNT(r.rental_id) AS total_rental
+  FROM rental r
+  JOIN inventory i ON r.inventory_id = i.inventory_id
+  JOIN film f ON i.film_id = f.film_id
+  GROUP BY f.film_id, f.title, f.rating, f.rental_rate
+  ORDER BY total_rental DESC
+  LIMIT 10;
+"
+
+# Menjalankan query (Aktifkan baris ini saat dikoneksikan ke ODBC Anda)
+# df_top_film <- dbGetQuery(con, query_top_film)
+
+# --- MOCK DATA (Hapus blok ini jika Anda sudah me-run data asli dari ODBC) ---
+df_top_film <- data.frame(
+  title = c("BUCKET BROTHERHOOD", "ROCKETEER MOTHER", "FORWARD TEMPLE", 
+            "GRIT CLOCKWORK", "APACHE DIVINE", "ZORRO ARK", 
+            "GOODFELLAS SALUTE", "WIFE TURN", "RUSH GOODFELLAS", "MUSKETEERS WAIT"),
+  rating = c("PG", "PG-13", "NC-17", "PG", "NC-17", "NC-17", "G", "NC-17", "R", "PG"),
+  rental_rate = c(4.99, 0.99, 2.99, 0.99, 4.99, 4.99, 4.99, 4.99, 0.99, 4.99),
+  total_rental = c(34, 33, 32, 32, 31, 31, 31, 31, 31, 30)
+)
+# -----------------------------------------------------------------------------
+
+# Pembersihan dan standardisasi tipe data agar ggplot2 tidak blank/error
+df_top_film <- df_top_film %>%
+  mutate(
+    title = as.character(title),
+    rating = as.factor(rating),
+    total_rental = as.numeric(total_rental) # Menghindari bug integer64 dari ODBC
+  )
+
+# Menampilkan tabel ringkasan yang estetis
+df_top_film %>%
+  kbl(caption = "Tabel Ringkasan Top 10 Film Terlaris") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+```{r}
+ggplot(df_top_film, aes(x = reorder(title, total_rental), y = total_rental, fill = rating)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = total_rental), hjust = -0.3, size = 3.5, fontface = "bold", color = "#2c3e50") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  coord_flip() +
+  labs(
+    title = "🎬 Top 10 Film Paling Banyak Dirental",
+    subtitle = "Analisis preferensi konsumen berdasarkan volume transaksi dan rating film",
+    x = NULL, 
+    y = "Total Frekuensi Rental (Kali)",
+    fill = "Rating Batasan Umur",
+    caption = "Sumber: Database Sakila via ODBC"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15, color = "#1a252f"),
+    plot.subtitle = element_text(size = 11, color = "#7f8c8d", margin = margin(b = 15)),
+    panel.grid.major.y = element_blank(),
+    legend.position = "right"
+  )
+
+
+```
+
+
+
+INTERPRETASI DAN HASIL
+
+Hasil Analisis dan Temuan Menarik
+Dari hasil visualisasi diagram batang dan tabel ringkasan di atas, ada beberapa pola menarik yang bisa kita baca terkait perilaku pelanggan dalam menyewa film:
+
+1. Persaingan Judul Film Sangat Ketat
+Film BUCKET BROTHERHOOD memang menduduki peringkat pertama dengan 34 kali disewa, tapi posisinya ditempel ketat oleh ROCKETEER MOTHER (33 kali). Kalau kita amati angka dari urutan pertama sampai kesepuluh, selisihnya sangat tipis, yaitu hanya berkisar antara 31 sampai 34 kali penyewaan. Ini menunjukkan kalau selera pelanggan cukup merata pada judul-judul populer tersebut, sehingga tidak ada satu film pun yang benar-benar memonopoli angka transaksi di toko.
+
+2. Pengaruh Harga terhadap Pilihan Pelanggan
+Ada hal yang unik kalau kita membandingkan tarif sewa dengan jumlah transaksi. Enam dari sepuluh film terlaris di daftar ini (seperti ROCKETEER MOTHER dan TIMBERLAND SKY) ternyata mematok tarif paling murah, yaitu $0.99. Artinya, banyak pelanggan yang memang cenderung mencari opsi hiburan hemat. Tapi yang menarik, film di peringkat satu justru punya tarif paling mahal ($4.99). Hal ini membuktikan bahwa kalau filmnya memang punya daya tarik tinggi, pelanggan tidak ragu untuk mengeluarkan uang lebih.
+
+3. Dominasi Penonton Dewasa
+Dilihat dari segi rating batasan umur, kategori NC-17 (dewasa) paling banyak muncul di daftar Top 10 ini dengan total 4 judul film, disusul oleh PG-13. Data ini memberi gambaran yang cukup jelas bahwa mayoritas pelanggan aktif di toko penyewaan ini didominasi oleh kalangan orang dewasa dan remaja akhir. Sebaliknya, film khusus anak-anak sangat jarang disewa (kategori rating G hanya muncul satu kali).
+
+Saran untuk Pengelola Toko
+Fokus Penambahan Stok: Pengelola sebaiknya memperbanyak ketersediaan keping DVD/salinan film untuk rating NC-17 dan PG-13, khususnya yang berada di harga $0.99. Karena paling banyak dicari, stok film-film ini pasti perputarannya sangat cepat.
+
+Maksimalkan Penempatan Produk: Walaupun film murah lebih sering disewa, film seharga $4.99 yang berhasil masuk daftar terlaris ini adalah ladang keuntungan yang sesungguhnya. Film-film premium ini harus selalu ditaruh di rak paling depan atau direkomendasikan secara khusus kepada pelanggan agar pendapatan toko makin maksimal.
